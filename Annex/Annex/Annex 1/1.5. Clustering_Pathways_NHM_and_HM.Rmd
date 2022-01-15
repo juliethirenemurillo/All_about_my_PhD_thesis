@@ -1,0 +1,411 @@
+---
+title: "Clustering of Pathways."
+author: "juliethmurillo@cideim.org.co"
+date: "`r Sys.Date()`"
+output:
+  rmdformats::readthedown:
+    code_download: true
+    code_folding: show
+    df_print: paged
+    fig_caption: true
+    fig_height: 7
+    fig_width: 7
+    highlight: tango
+    width: 300
+    keep_md: false
+    mode: selfcontained
+    toc_float: true
+  BiocStyle::html_document:
+    code_download: true
+    code_folding: show
+    fig_caption: true
+    fig_height: 7
+    fig_width: 7
+    highlight: tango
+    keep_md: false
+    mode: selfcontained
+    toc_float: true
+  html_document:
+    code_download: true
+    code_folding: show
+    fig_caption: true
+    fig_height: 7
+    fig_width: 7
+    highlight: tango
+    keep_md: false
+    mode: selfcontained
+    number_sections: true
+    self_contained: true
+    theme: readable
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+---
+
+<style type="text/css">
+body, td {
+  font-size: 16px;
+}
+code.r{
+  font-size: 16px;
+}
+pre {
+ font-size: 16p^
+</style>
+
+## Load libraries 
+
+```{r libraries}
+library("readxl")
+library("xlsx")
+library("tidyr")
+library("dplyr")
+library("hpgltools")
+library("DESeq2")
+library("sva")
+library("preprocessCore")
+library("RColorBrewer")
+library("gplots")
+library("reshape2")
+library("ggplot2")
+library("pheatmap")
+library("org.Hs.eg.db")
+library("clusterProfiler")
+library("gprofiler2")
+library("biomaRt")
+library("testthat")
+library("DOSE")
+source(Binary_matrix)
+```
+
+# Importing DE gene lists
+
+```{r read_table, eval=FALSE}
+####Importing Non-healing and Healing transcriptomes
+DE_table_Chr_Nil_annotated <- as.data.frame(read_excel("../Chr_Nil_QA_and_DEseq_annotation/DE_table_Chr_Nil_annotated.xlsx"))
+DE_table_Failure_Nil_annotated <- as.data.frame(read_excel("../Failure_Nil_QA_and_DEseq_annotation/DE_table_Failure_Nil_annotated.xlsx"))
+DE_table_Sh_Nil_annotated <- as.data.frame(read_excel("../Self_healing_Nil_QA_and_DEseq_annotation/DE_table_Sh_Nil_annotated.xlsx"))
+DE_table_Cure_Nil_annotated <- as.data.frame(read_excel("../Cure_Nil_QA_and_DEseq_annotation/DE_table_Cure_Nil_annotated.xlsx"))
+###Uploading the gene-level count datasets
+```
+
+#Creating a dataframe for the GO comparison
+
+```{r}
+Chr_Up<- data.frame(ENTREZID = DE_table_Chr_Nil_annotated$ENTREZID[DE_table_Chr_Nil_annotated$log2FoldChange >= 1], FC = DE_table_Chr_Nil_annotated$log2FoldChange[DE_table_Chr_Nil_annotated$log2FoldChange >= 1])
+
+Failure_Up <- data.frame(ENTREZID = DE_table_Failure_Nil_annotated$ENTREZID[DE_table_Failure_Nil_annotated$log2FoldChange >= 1], FC = DE_table_Failure_Nil_annotated$log2FoldChange[DE_table_Failure_Nil_annotated$log2FoldChange >= 1])
+
+Failure_down <- data.frame(ENTREZID = DE_table_Failure_Nil_annotated$ENTREZID[DE_table_Failure_Nil_annotated$log2FoldChange <= -1], FC = DE_table_Failure_Nil_annotated$log2FoldChange[DE_table_Failure_Nil_annotated$log2FoldChange <= -1])
+
+#-----------------------------------------------
+Sh_Up<- data.frame(ENTREZID = DE_table_Sh_Nil_annotated$ENTREZID[DE_table_Sh_Nil_annotated$log2FoldChange >= 1], FC = DE_table_Sh_Nil_annotated$log2FoldChange[DE_table_Sh_Nil_annotated$log2FoldChange >= 1])
+
+Sh_down<- data.frame(ENTREZID = DE_table_Sh_Nil_annotated$ENTREZID[DE_table_Sh_Nil_annotated$log2FoldChange <= -1], FC = DE_table_Sh_Nil_annotated$log2FoldChange[DE_table_Sh_Nil_annotated$log2FoldChange <= -1])
+
+Cure_Up <- data.frame(ENTREZID = DE_table_Cure_Nil_annotated$ENTREZID[DE_table_Cure_Nil_annotated$log2FoldChange >= 1], FC = DE_table_Cure_Nil_annotated$log2FoldChange[DE_table_Cure_Nil_annotated$log2FoldChange >= 1])
+
+Cure_down <- data.frame(ENTREZID = DE_table_Cure_Nil_annotated$ENTREZID[DE_table_Cure_Nil_annotated$log2FoldChange <= -1], FC = DE_table_Cure_Nil_annotated$log2FoldChange[DE_table_Cure_Nil_annotated$log2FoldChange <= -1])
+
+```
+#Reactome enrichment Non_Healing_and_Healing_up_down 
+
+```{r}
+#Chr up
+#reactome web 413 gene-symbols as input (no NAs). 227 genes in the enriched pathways (didn't find 186 genes)
+pathways_Chr_up <-as.data.frame(read_excel("ReactomeWeb_ORA/Chr/Reactome_web_ORA_Chr_Up_editedNames.xlsx")) #845
+pathways_Chr_up <- filter(pathways_Chr_up, `#Entities found`>= 4) #245
+
+#Failure up
+pathways_Failure_up <-as.data.frame(read_excel("ReactomeWeb_ORA/Failure/Reactome_web_ORA_Failure_Up_EditedNames.xlsx")) #607 pathways
+pathways_Failure_up <- filter(pathways_Failure_up, `#Entities found`>= 4) #146
+
+#Cure up
+pathways_Cure_up <-as.data.frame(read_excel("ReactomeWeb_ORA/Cure/Reactome_web_ORA_Cure_Up_EditedNames.xlsx")) #577 pathways
+pathways_Cure_up <- filter(pathways_Cure_up, `#Entities found`>= 4) #145
+
+#Chr down
+#reactome web 202 gene-symbols as input (no NAs)
+pathways_Chr_down <-as.data.frame(read_excel("ReactomeWeb_ORA/Chr/Reactome_web_ORA_Chr_Down_editedNames.xlsx")) #552
+pathways_Chr_down <- filter(pathways_Chr_down, `#Entities found`>= 4) #77
+
+#Failure down
+#87 as input
+pathways_Failure_down <-as.data.frame(read_excel("ReactomeWeb_ORA/Failure/Reactome_web_ORA_Failure_Down.xlsx")) #325 pathways
+pathways_Failure_down <- filter(pathways_Failure_down, `#Entities found`>= 4) #41
+
+#Sh down
+#35 as input
+pathways_Sh_down <-as.data.frame(read_excel("ReactomeWeb_ORA/Sh/Reactome_web_ORA_Sh_Down.xlsx")) #98 pathways
+pathways_Sh_down <- filter(pathways_Sh_down, `#Entities found`>= 4) #5
+
+#Cure down
+# 74 as input
+pathways_Cure_down <-as.data.frame(read_excel("ReactomeWeb_ORA/Cure/Reactome_web_ORA_Cure_Down_EditedNames.xlsx")) #263 pathways
+pathways_Cure_down <- filter(pathways_Cure_down, `#Entities found`>= 4) #24
+
+```
+
+# Accounting for the genes that are part of the enrichment
+
+```{r}
+#Chr up
+Concatenated_Genes_in_pathways_Chr_up <- as.data.frame(pathways_Chr_up$`Submitted entities found`)
+colnames(Concatenated_Genes_in_pathways_Chr_up) <- "geneID"
+
+Unconcatenated_Genes_in_pathways_Chr_up <- data.frame(do.call('rbind', strsplit(as.character(Concatenated_Genes_in_pathways_Chr_up$geneID), ';', fixed = TRUE))) #as it is a not quadratic matrix it duplicates genes in some rows to fill up the gaps
+
+Genes_in_pathways_Chr_up <- unique(as.vector(rapply(Unconcatenated_Genes_in_pathways_Chr_up, function(x)unique(x))))
+
+#Failure up
+Concatenated_Genes_in_pathways_Failure_up <- as.data.frame(pathways_Failure_up$`Submitted entities found`)
+colnames(Concatenated_Genes_in_pathways_Failure_up) <- "geneID"
+
+Unconcatenated_Genes_in_pathways_Failure_up <- data.frame(do.call('rbind', strsplit(as.character(Concatenated_Genes_in_pathways_Failure_up$geneID), ';', fixed = TRUE))) #as it is a not quadratic matrix it duplicates genes in some rows to fill up the gaps
+
+Genes_in_pathways_Failure_up <- unique(as.vector(rapply(Unconcatenated_Genes_in_pathways_Failure_up, function(x)unique(x))))
+
+
+#Cure up
+Concatenated_Genes_in_pathways_Cure_up <- as.data.frame(pathways_Cure_up$`Submitted entities found`)
+colnames(Concatenated_Genes_in_pathways_Cure_up) <- "geneID"
+
+Unconcatenated_Genes_in_pathways_Cure_up <- data.frame(do.call('rbind', strsplit(as.character(Concatenated_Genes_in_pathways_Cure_up$geneID), ';', fixed = TRUE))) #as it is a not quadratic matrix it duplicates genes in some rows to fill up the gaps
+
+Genes_in_pathways_Cure_up <- unique(as.vector(rapply(Unconcatenated_Genes_in_pathways_Cure_up, function(x)unique(x))))
+
+
+#Chr down
+Concatenated_Genes_in_pathways_Chr_down <- as.data.frame(pathways_Chr_down$`Submitted entities found`)
+colnames(Concatenated_Genes_in_pathways_Chr_down) <- "geneID"
+
+Unconcatenated_Genes_in_pathways_Chr_down <- data.frame(do.call('rbind', strsplit(as.character(Concatenated_Genes_in_pathways_Chr_down$geneID), ';', fixed = TRUE))) #as it is a not quadratic matrix it duplicates genes in some rows to fill down the gaps
+
+Genes_in_pathways_Chr_down <- unique(as.vector(rapply(Unconcatenated_Genes_in_pathways_Chr_down, function(x)unique(x))))
+
+#Failure down
+Concatenated_Genes_in_pathways_Failure_down <- as.data.frame(pathways_Failure_down$`Submitted entities found`)
+colnames(Concatenated_Genes_in_pathways_Failure_down) <- "geneID"
+
+Unconcatenated_Genes_in_pathways_Failure_down <- data.frame(do.call('rbind', strsplit(as.character(Concatenated_Genes_in_pathways_Failure_down$geneID), ';', fixed = TRUE))) #as it is a not quadratic matrix it duplicates genes in some rows to fill down the gaps
+
+Genes_in_pathways_Failure_down <- unique(as.vector(rapply(Unconcatenated_Genes_in_pathways_Failure_down, function(x)unique(x))))
+
+#Sh down
+Concatenated_Genes_in_pathways_Sh_down <- as.data.frame(pathways_Sh_down$`Submitted entities found`)
+colnames(Concatenated_Genes_in_pathways_Sh_down) <- "geneID"
+
+Unconcatenated_Genes_in_pathways_Sh_down <- data.frame(do.call('rbind', strsplit(as.character(Concatenated_Genes_in_pathways_Sh_down$geneID), ';', fixed = TRUE))) #as it is a not quadratic matrix it duplicates genes in some rows to fill down the gaps
+
+Genes_in_pathways_Sh_down <- unique(as.vector(rapply(Unconcatenated_Genes_in_pathways_Sh_down, function(x)unique(x))))
+
+
+#Cure down
+Concatenated_Genes_in_pathways_Cure_down <- as.data.frame(pathways_Cure_down$`Submitted entities found`)
+colnames(Concatenated_Genes_in_pathways_Cure_down) <- "geneID"
+
+Unconcatenated_Genes_in_pathways_Cure_down <- data.frame(do.call('rbind', strsplit(as.character(Concatenated_Genes_in_pathways_Cure_down$geneID), ';', fixed = TRUE))) #as it is a not quadratic matrix it duplicates genes in some rows to fill down the gaps
+Genes_in_pathways_Cure_down <- unique(as.vector(rapply(Unconcatenated_Genes_in_pathways_Cure_down, function(x)unique(x))))
+
+
+```
+
+
+#Creating a dataframe with the enriched pathways in the rows and the genes in the columns and "cero"
+#instead of NA
+
+
+```{r}
+#Chronic up
+pathways_and_genes_Chr_up <- separate(Concatenated_Genes_in_pathways_Chr_up, geneID, paste0("X",1:length(colnames(Unconcatenated_Genes_in_pathways_Chr_up))), sep=";")
+row.names(pathways_and_genes_Chr_up) <- pathways_Chr_up$`Pathway name`
+pathways_and_genes_Chr_up[is.na(pathways_and_genes_Chr_up)]<-0
+
+binary_matrix_pathways_genes_Chr_up_empty <- data.frame(matrix(ncol=length(Genes_in_pathways_Chr_up), nrow = length(row.names(pathways_and_genes_Chr_up))))
+colnames(binary_matrix_pathways_genes_Chr_up_empty) <- Genes_in_pathways_Chr_up
+row.names(binary_matrix_pathways_genes_Chr_up_empty) <- row.names(pathways_and_genes_Chr_up)
+binary_matrix_pathways_genes_Chr_up_empty[is.na(binary_matrix_pathways_genes_Chr_up_empty)] <-0
+
+binary_matrix_pathways_genes_Chr_up <- Binary_matrix(pathways_and_genes_Chr_up, binary_matrix_pathways_genes_Chr_up_empty)
+
+# write.xlsx(binary_matrix_pathways_genes_Chr_up, "Pathways_clustering/Chr/binary_matrix_pathways_genes_Chr_up.xlsx")
+
+binary_matrix_pathways_genes_Chr_up <- as.data.frame(read_excel("Pathways_clustering/Chr/binary_matrix_pathways_genes_Chr_up.xlsx"))
+row.names(binary_matrix_pathways_genes_Chr_up) <- binary_matrix_pathways_genes_Chr_up$...1
+binary_matrix_pathways_genes_Chr_up<-dplyr::select(binary_matrix_pathways_genes_Chr_up, -...1)
+d <- dist(binary_matrix_pathways_genes_Chr_up, method = "binary")
+hc <- hclust(d)
+
+pdf("Pathways_clustering/Chr/Cluster_pathways_Chr_Up.pdf", width = 32.375, height = 15)
+plot(hc)
+dev.off()
+
+
+```
+```{r}
+#Failure up
+pathways_and_genes_Failure_up <- separate(Concatenated_Genes_in_pathways_Failure_up, geneID, paste0("X",1:length(colnames(Unconcatenated_Genes_in_pathways_Failure_up))), sep=";")
+row.names(pathways_and_genes_Failure_up) <- pathways_Failure_up$`Pathway name`
+pathways_and_genes_Failure_up[is.na(pathways_and_genes_Failure_up)]<-0
+
+binary_matrix_pathways_genes_Failure_up_empty <- data.frame(matrix(ncol=length(Genes_in_pathways_Failure_up), nrow = length(row.names(pathways_and_genes_Failure_up))))
+colnames(binary_matrix_pathways_genes_Failure_up_empty) <- Genes_in_pathways_Failure_up
+row.names(binary_matrix_pathways_genes_Failure_up_empty) <- row.names(pathways_and_genes_Failure_up)
+binary_matrix_pathways_genes_Failure_up_empty[is.na(binary_matrix_pathways_genes_Failure_up_empty)] <-0
+
+binary_matrix_pathways_genes_Failure_up <- Binary_matrix(pathways_and_genes_Failure_up, binary_matrix_pathways_genes_Failure_up_empty)
+
+#write.xlsx(binary_matrix_pathways_genes_Failure_up, "Pathways_clustering/Failure/binary_matrix_pathways_genes_Failure_up.xlsx")
+
+binary_matrix_pathways_genes_Failure_up <- as.data.frame(read_excel("Pathways_clustering/Failure/binary_matrix_pathways_genes_Failure_up.xlsx"))
+row.names(binary_matrix_pathways_genes_Failure_up) <- binary_matrix_pathways_genes_Failure_up$...1
+binary_matrix_pathways_genes_Failure_up<-dplyr::select(binary_matrix_pathways_genes_Failure_up, -...1)
+d <- dist(binary_matrix_pathways_genes_Failure_up, method = "binary")
+hc <- hclust(d)
+
+pdf("Pathways_clustering/Failure/Cluster_pathways_Failure_Up.pdf", width = 32.375, height = 15)
+plot(hc)
+dev.off()
+
+
+```
+
+```{r}
+#Cure up
+pathways_and_genes_Cure_up <- separate(Concatenated_Genes_in_pathways_Cure_up, geneID, paste0("X",1:length(colnames(Unconcatenated_Genes_in_pathways_Cure_up))), sep=";")
+row.names(pathways_and_genes_Cure_up) <- pathways_Cure_up$`Pathway name`
+pathways_and_genes_Cure_up[is.na(pathways_and_genes_Cure_up)]<-0
+
+binary_matrix_pathways_genes_Cure_up_empty <- data.frame(matrix(ncol=length(Genes_in_pathways_Cure_up), nrow = length(row.names(pathways_and_genes_Cure_up))))
+colnames(binary_matrix_pathways_genes_Cure_up_empty) <- Genes_in_pathways_Cure_up
+row.names(binary_matrix_pathways_genes_Cure_up_empty) <- row.names(pathways_and_genes_Cure_up)
+binary_matrix_pathways_genes_Cure_up_empty[is.na(binary_matrix_pathways_genes_Cure_up_empty)] <-0
+
+binary_matrix_pathways_genes_Cure_up <- Binary_matrix(pathways_and_genes_Cure_up, binary_matrix_pathways_genes_Cure_up_empty)
+
+#write.xlsx(binary_matrix_pathways_genes_Cure_up, "Pathways_clustering/Cure/binary_matrix_pathways_genes_Cure_up.xlsx")
+
+binary_matrix_pathways_genes_Cure_up <- as.data.frame(read_excel("Pathways_clustering/Cure/binary_matrix_pathways_genes_Cure_up.xlsx"))
+row.names(binary_matrix_pathways_genes_Cure_up) <- binary_matrix_pathways_genes_Cure_up$...1
+binary_matrix_pathways_genes_Cure_up<-dplyr::select(binary_matrix_pathways_genes_Cure_up, -...1)
+d <- dist(binary_matrix_pathways_genes_Cure_up, method = "binary")
+hc <- hclust(d)
+
+pdf("Pathways_clustering/Cure/Cluster_pathways_Cure_Up.pdf", width = 32.375, height = 15)
+plot(hc)
+dev.off()
+
+
+```
+
+```{r}
+#Chr down
+pathways_and_genes_Chr_down <- separate(Concatenated_Genes_in_pathways_Chr_down, geneID, paste0("X",1:length(colnames(Unconcatenated_Genes_in_pathways_Chr_down))), sep=";")
+row.names(pathways_and_genes_Chr_down) <- pathways_Chr_down$`Pathway name`
+pathways_and_genes_Chr_down[is.na(pathways_and_genes_Chr_down)]<-0
+
+binary_matrix_pathways_genes_Chr_down_empty <- data.frame(matrix(ncol=length(Genes_in_pathways_Chr_down), nrow = length(row.names(pathways_and_genes_Chr_down))))
+colnames(binary_matrix_pathways_genes_Chr_down_empty) <- Genes_in_pathways_Chr_down
+row.names(binary_matrix_pathways_genes_Chr_down_empty) <- row.names(pathways_and_genes_Chr_down)
+binary_matrix_pathways_genes_Chr_down_empty[is.na(binary_matrix_pathways_genes_Chr_down_empty)] <-0
+
+binary_matrix_pathways_genes_Chr_down <- Binary_matrix(pathways_and_genes_Chr_down, binary_matrix_pathways_genes_Chr_down_empty)
+
+write.xlsx(binary_matrix_pathways_genes_Chr_down, "Pathways_clustering/Chr/binary_matrix_pathways_genes_Chr_down.xlsx")
+
+binary_matrix_pathways_genes_Chr_down <- as.data.frame(read_excel("Pathways_clustering/Chr/binary_matrix_pathways_genes_Chr_down.xlsx"))
+row.names(binary_matrix_pathways_genes_Chr_down) <- binary_matrix_pathways_genes_Chr_down$...1
+binary_matrix_pathways_genes_Chr_down<-dplyr::select(binary_matrix_pathways_genes_Chr_down, -...1)
+d <- dist(binary_matrix_pathways_genes_Chr_down, method = "binary")
+hc <- hclust(d)
+
+pdf("Pathways_clustering/Chr/Cluster_pathways_Chr_down.pdf", width = 32.375, height = 15)
+plot(hc)
+dev.off()
+
+
+```
+
+
+```{r}
+#Failure up
+pathways_and_genes_Failure_down <- separate(Concatenated_Genes_in_pathways_Failure_down, geneID, paste0("X",1:length(colnames(Unconcatenated_Genes_in_pathways_Failure_down))), sep=";")
+row.names(pathways_and_genes_Failure_down) <- pathways_Failure_down$`Pathway name`
+pathways_and_genes_Failure_down[is.na(pathways_and_genes_Failure_down)]<-0
+
+binary_matrix_pathways_genes_Failure_down_empty <- data.frame(matrix(ncol=length(Genes_in_pathways_Failure_down), nrow = length(row.names(pathways_and_genes_Failure_down))))
+colnames(binary_matrix_pathways_genes_Failure_down_empty) <- Genes_in_pathways_Failure_down
+row.names(binary_matrix_pathways_genes_Failure_down_empty) <- row.names(pathways_and_genes_Failure_down)
+binary_matrix_pathways_genes_Failure_down_empty[is.na(binary_matrix_pathways_genes_Failure_down_empty)] <-0
+
+binary_matrix_pathways_genes_Failure_down <- Binary_matrix(pathways_and_genes_Failure_down, binary_matrix_pathways_genes_Failure_down_empty)
+
+#write.xlsx(binary_matrix_pathways_genes_Failure_down, "Pathways_clustering/Failure/binary_matrix_pathways_genes_Failure_down.xlsx")
+
+binary_matrix_pathways_genes_Failure_down <- as.data.frame(read_excel("Pathways_clustering/Failure/binary_matrix_pathways_genes_Failure_down.xlsx"))
+row.names(binary_matrix_pathways_genes_Failure_down) <- binary_matrix_pathways_genes_Failure_down$...1
+binary_matrix_pathways_genes_Failure_down<-dplyr::select(binary_matrix_pathways_genes_Failure_down, -...1)
+d <- dist(binary_matrix_pathways_genes_Failure_down, method = "binary")
+hc <- hclust(d)
+
+pdf("Pathways_clustering/Failure/Cluster_pathways_Failure_down.pdf", width = 32.375, height = 15)
+plot(hc)
+dev.off()
+
+
+```
+
+```{r}
+#Sh down
+pathways_and_genes_Sh_down <- separate(Concatenated_Genes_in_pathways_Sh_down, geneID, paste0("X",1:length(colnames(Unconcatenated_Genes_in_pathways_Sh_down))), sep=";")
+row.names(pathways_and_genes_Sh_down) <- pathways_Sh_down$`Pathway name`
+pathways_and_genes_Sh_down[is.na(pathways_and_genes_Sh_down)]<-0
+
+binary_matrix_pathways_genes_Sh_down_empty <- data.frame(matrix(ncol=length(Genes_in_pathways_Sh_down), nrow = length(row.names(pathways_and_genes_Sh_down))))
+colnames(binary_matrix_pathways_genes_Sh_down_empty) <- Genes_in_pathways_Sh_down
+row.names(binary_matrix_pathways_genes_Sh_down_empty) <- row.names(pathways_and_genes_Sh_down)
+binary_matrix_pathways_genes_Sh_down_empty[is.na(binary_matrix_pathways_genes_Sh_down_empty)] <-0
+
+binary_matrix_pathways_genes_Sh_down <- Binary_matrix(pathways_and_genes_Sh_down, binary_matrix_pathways_genes_Sh_down_empty)
+
+#write.xlsx(binary_matrix_pathways_genes_Sh_down, "Pathways_clustering/Sh/binary_matrix_pathways_genes_Sh_down.xlsx")
+
+binary_matrix_pathways_genes_Sh_down <- as.data.frame(read_excel("Pathways_clustering/Sh/binary_matrix_pathways_genes_Sh_down.xlsx"))
+row.names(binary_matrix_pathways_genes_Sh_down) <- binary_matrix_pathways_genes_Sh_down$...1
+binary_matrix_pathways_genes_Sh_down<-dplyr::select(binary_matrix_pathways_genes_Sh_down, -...1)
+d <- dist(binary_matrix_pathways_genes_Sh_down, method = "binary")
+hc <- hclust(d)
+
+pdf("Pathways_clustering/Sh/Cluster_pathways_Sh_down.pdf", width = 32.375, height = 15)
+plot(hc)
+dev.off()
+
+
+```
+```{r}
+#Cure down
+pathways_and_genes_Cure_down <- separate(Concatenated_Genes_in_pathways_Cure_down, geneID, paste0("X",1:length(colnames(Unconcatenated_Genes_in_pathways_Cure_down))), sep=";")
+row.names(pathways_and_genes_Cure_down) <- pathways_Cure_down$`Pathway name`
+pathways_and_genes_Cure_down[is.na(pathways_and_genes_Cure_down)]<-0
+
+binary_matrix_pathways_genes_Cure_down_empty <- data.frame(matrix(ncol=length(Genes_in_pathways_Cure_down), nrow = length(row.names(pathways_and_genes_Cure_down))))
+colnames(binary_matrix_pathways_genes_Cure_down_empty) <- Genes_in_pathways_Cure_down
+row.names(binary_matrix_pathways_genes_Cure_down_empty) <- row.names(pathways_and_genes_Cure_down)
+binary_matrix_pathways_genes_Cure_down_empty[is.na(binary_matrix_pathways_genes_Cure_down_empty)] <-0
+
+binary_matrix_pathways_genes_Cure_down <- Binary_matrix(pathways_and_genes_Cure_down, binary_matrix_pathways_genes_Cure_down_empty)
+
+write.xlsx(binary_matrix_pathways_genes_Cure_down, "Pathways_clustering/Cure/binary_matrix_pathways_genes_Cure_down.xlsx")
+
+binary_matrix_pathways_genes_Cure_down <- as.data.frame(read_excel("Pathways_clustering/Cure/binary_matrix_pathways_genes_Cure_down.xlsx"))
+row.names(binary_matrix_pathways_genes_Cure_down) <- binary_matrix_pathways_genes_Cure_down$...1
+binary_matrix_pathways_genes_Cure_down<-dplyr::select(binary_matrix_pathways_genes_Cure_down, -...1)
+d <- dist(binary_matrix_pathways_genes_Cure_down, method = "binary")
+hc <- hclust(d)
+
+pdf("Pathways_clustering/Cure/Cluster_pathways_Cure_down.pdf", width = 32.375, height = 15)
+plot(hc)
+dev.off()
+
+```

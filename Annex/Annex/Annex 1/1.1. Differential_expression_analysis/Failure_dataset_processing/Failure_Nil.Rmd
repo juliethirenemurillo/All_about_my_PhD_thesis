@@ -1,0 +1,266 @@
+---
+title: "Nil versus Failure Differential Expression Analysis."
+author: "juliethmurillo@cideim.org.co"
+date: "`r Sys.Date()`"
+output:
+  rmdformats::readthedown:
+    code_download: true
+    code_folding: show
+    df_print: paged
+    fig_caption: true
+    fig_height: 7
+    fig_width: 7
+    highlight: tango
+    width: 300
+    keep_md: false
+    mode: selfcontained
+    toc_float: true
+  BiocStyle::html_document:
+    code_download: true
+    code_folding: show
+    fig_caption: true
+    fig_height: 7
+    fig_width: 7
+    highlight: tango
+    keep_md: false
+    mode: selfcontained
+    toc_float: true
+  html_document:
+    code_download: true
+    code_folding: show
+    fig_caption: true
+    fig_height: 7
+    fig_width: 7
+    highlight: tango
+    keep_md: false
+    mode: selfcontained
+    number_sections: true
+    self_contained: true
+    theme: readable
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+---
+
+<style type="text/css">
+body, td {
+  font-size: 16px;
+}
+code.r{
+  font-size: 16px;
+}
+pre {
+ font-size: 16p^
+</style>
+
+## Load libraries 
+
+```{r libraries}
+library("readxl")
+library("xlsx")
+library("tidyr")
+library("dplyr")
+library("hpgltools")
+library("DESeq2")
+library("sva")
+library('preprocessCore')
+library(RColorBrewer)
+library(gplots)
+library(reshape2)
+library(ggplot2)
+library("pheatmap")
+library("org.Hs.eg.db")
+library("clusterProfiler")
+library("gprofiler2")
+library("biomaRt")
+library('testthat')
+```
+
+# Read chonic vs. nil table
+
+```{r read_table, eval=FALSE}
+####UNINFECTED AND FAILUREC
+
+###Uploading the gene-level count datasets
+Count_table_Failure_Nil <-read_excel("../Count_table_Failure_Nil.xlsx")
+Count_table_Failure_Nil <- as.data.frame(Count_table_Failure_Nil)
+
+rownames(Count_table_Failure_Nil) <- Count_table_Failure_Nil[["GeneID"]]
+Count_table_Failure_Nil[["GeneID"]] <- NULL
+
+```
+
+# Creating a metadata data frame
+
+```{r metadata}
+###Creating the metada dataframe
+
+samples <- as.vector(colnames(Count_table_Failure_Nil))
+condition <- as.factor(c("Failure", "Failure", "Failure", "Nil", "Nil", "Nil"))
+batch <- c("a", "b", "c", "a", "b", "c")
+names(condition) <- colnames(Count_table_Failure_Nil)
+
+metadataFailure_Nil <- data.frame(condition, batch) #metadata
+
+Count_table_Failure_Nil <- Count_table_Failure_Nil[, rownames(metadataFailure_Nil)] #This is for ordering the columns in the count_table in a sequence based on the condition (Nil or Failure). Sometimes this is useful when the count table has many columns not ordered by the condition.
+dim(Count_table_Failure_Nil)
+```
+#Creat the "expt" object based on hpgltools 
+
+```{r}
+Failure_Nil_expt.obj <- create_expt(metadata=metadataFailure_Nil, count_dataframe=Count_table_Failure_Nil)
+head(pData(Failure_Nil_expt.obj))
+
+new_colors <- c("#009900", "#990000",  "#000099")
+names(new_colors) <- c("Nil", "Failure")
+
+Failure_Nil_expt.obj <- set_expt_colors(Failure_Nil_expt.obj, colors=new_colors)
+
+sampleid <- as.character(pData(Failure_Nil_expt.obj)[["sampleid"]])
+Failure_Nil_expt.obj <- set_expt_samplenames(Failure_Nil_expt.obj, sampleid)
+
+Failure_Nil_expt.obj1 <- set_expt_colors(Failure_Nil_expt.obj, colors=new_colors)
+Failure_Nil_expt.obj1 <- set_expt_samplenames(Failure_Nil_expt.obj1, sampleid)
+
+
+```
+
+#Normalization and Batch accessment
+
+```{r}
+svaseq_batch_Failure <- sm(normalize_expt(Failure_Nil_expt.obj1, filter=TRUE,
+                                  convert="cpm",
+                                  transform="log2", batch="svaseq"))
+
+
+pp(file="Failure_Nil_PCA_svaseq2.png", image=plot_pca(svaseq_batch_Failure)$plot)
+
+```
+
+```{r}
+fig_s1 <- sm(write_expt(
+    Failure_Nil_expt.obj1, norm="raw", violin=FALSE, convert="cpm",
+    transform="log2", batch="svaseq", filter=TRUE,
+    excel=paste0("excel/figure_Failure_Nil.xlsx")))
+
+```
+
+# Filter low-counts and Differential expression analysis
+
+```{r}
+
+Count_table_Failure_Nil_Filtered_cbcb <- cbcb_filter_counts(Count_table_Failure_Nil, threshold = 1, min_samples = 3) #min samples corresponds to the number of samples in the smaller condition group
+Count_table_Failure_Nil_Filtered <- Count_table_Failure_Nil_Filtered_cbcb$count_table
+
+dds <- DESeqDataSetFromMatrix(countData = Count_table_Failure_Nil_Filtered,
+                              colData = metadataFailure_Nil,
+                              design= ~ condition)
+dds$condition <- relevel(dds$condition, ref = "Nil")
+
+dat  <- counts(dds)
+dat1 <- as.matrix(log2(as.matrix(dat) + 1))
+mod  <- model.matrix(~ condition, colData(dds))
+mod0 <- mod[, 1]
+n.sv <- sva::num.sv(dat1,mod,method="be")
+svseq <- svaseq(as.matrix(dat), mod, mod0, n.sv = n.sv)
+
+ddssva2 <- dds
+ddssva2$SV1 <- svseq$sv[,1]
+design(ddssva2) <- ~SV1 + condition
+ddssva2 <- estimateSizeFactors(ddssva2)
+ddssva2 <- estimateDispersions(ddssva2)
+ddssva2 <- DESeq(ddssva2)
+deseq_table <- as.data.frame(results(ddssva2))
+
+deseq_table_sig_indixes <- deseq_table[["padj"]] <= 0.05
+deseq_table_sig <- deseq_table[deseq_table_sig_indixes, ]
+# deseq_table_sig_up_indexes <- deseq_table_sig[["log2FoldChange"]] >= 1.0
+# deseq_table_sig_up <- deseq_table_sig[deseq_table_sig_up_indexes, ]
+# dim(deseq_table_sig_up)
+
+```
+#Annotating the deseq_table
+
+```{r switching_filters, eval=FALSE}
+
+DE_table_Failure_Nil <- deseq_table_sig %>% dplyr::select(log2FoldChange, padj)  #Get rid of the columns I won't use
+                              
+Failure_Nil_ENTREZID <- bitr(row.names(DE_table_Failure_Nil), fromType="ENSEMBL", toType="ENTREZID", OrgDb="org.Hs.eg.db") # 5.64%  of input gene IDs are fail to map
+
+Failure_Nil_ENTREZID <- Failure_Nil_ENTREZID[!duplicated(Failure_Nil_ENTREZID$ENSEMBL), ] #2 duplicates #251 unique
+
+Failure_Nil_ENTREZID_SYMBOLS <- gprofiler2::gconvert(Failure_Nil_ENTREZID$ENSEMBL, organism = "hsapiens", target = "ENSG",
+                                                                   numeric_ns = "", mthreshold = Inf, filter_na = T) #dim 251 7
+
+Failure_Nil_ENTREZID_SYMBOLS <- Failure_Nil_ENTREZID_SYMBOLS%>% dplyr::select(-input_number,
+                                                                      -target_number, -target, -description, -namespace)
+colnames(Failure_Nil_ENTREZID_SYMBOLS) <- c("ENSEMBL", "SYMBOL")
+
+Failure_Nil_ENTREZID_SYMBOLS <- left_join(Failure_Nil_ENTREZID, Failure_Nil_ENTREZID_SYMBOLS, by = "ENSEMBL")
+
+
+
+Failure_Nil_ENSEMBLID_NO_Identificados <- as.factor(made4::comparelists(row.names(DE_table_Failure_Nil), Failure_Nil_ENTREZID$ENSEMBL)$Set.Diff) # n = 15
+Failure_Nil_ENSEMBLID_NO_Identificados_SYMBOLS <- gprofiler2::gconvert(Failure_Nil_ENSEMBLID_NO_Identificados, organism = "hsapiens", target = "ENSG",
+                                                             numeric_ns = "", mthreshold = Inf, filter_na = T) #dim 15 7
+
+Failure_Nil_ENSEMBLID_NO_Identificados_SYMBOLS <- Failure_Nil_ENSEMBLID_NO_Identificados_SYMBOLS %>% dplyr::select(-input_number,
+                                                                          -target_number, -target, -description, -namespace)
+colnames (Failure_Nil_ENSEMBLID_NO_Identificados_SYMBOLS) <- c("ENSEMBL", "SYMBOL")
+
+
+#The symbols are searched for the entrez id. I think the reason why some id ensembls are not directly associated with the entrezid but if its symbol is because the symbol is directly linked to the id of the ncbi
+Failure_Nil_ENSEMBLID_NO_Identificados_SYMBOLS_ENTREZIDs <- bitr(Failure_Nil_ENSEMBLID_NO_Identificados_SYMBOLS$SYMBOL, fromType="SYMBOL", toType="ENTREZID", OrgDb="org.Hs.eg.db")  #30% of input gene IDs are fail to map
+
+#Join Symbol with its corresponding entrezid and ensembl id (within the no Identified genes)
+Failure_Nil_ENSEMBLID_SYMBOL_ENTREZIDs <- left_join(Failure_Nil_ENSEMBLID_NO_Identificados_SYMBOLS, Failure_Nil_ENSEMBLID_NO_Identificados_SYMBOLS_ENTREZIDs, by = "SYMBOL")
+
+Failure_Nil_ENSEMBLID_SYMBOL_ENTREZIDs <- Failure_Nil_ENSEMBLID_SYMBOL_ENTREZIDs[, c(1,3,2)]
+
+#5. JOIN THE IDENTIFIER IDENTIFIED DIRECTLY BY THE ENSEMBL CODE AND IDENTIFIED IDENTIFIED ENTRY FROM THE SYMBOL
+
+Failure_Nil_ENTREZIDs_Complete <- bind_rows(Failure_Nil_ENTREZID_SYMBOLS, Failure_Nil_ENSEMBLID_SYMBOL_ENTREZIDs) # 266    3
+
+colnames(Failure_Nil_ENTREZIDs_Complete) <- c("GeneID", "ENTREZID", "SYMBOL")
+
+#6. ADDING THE IDENTIFICATION TO THE CORRESPONDING ENSEMBL ID OF THE DATAFRAME OF THE GENES ON EXPRESSED
+
+DE_table_Failure_Nil_2 <- cbind(GeneID = row.names(DE_table_Failure_Nil), DE_table_Failure_Nil)
+
+DE_table_Failure_Nil_annotated <- left_join(DE_table_Failure_Nil_2, Failure_Nil_ENTREZIDs_Complete, by = "GeneID") #266 5
+
+#7 Add a column with the ids for kegg
+DE_table_Failure_Nil_annotated$kegg <- paste("hsa:", DE_table_Failure_Nil_annotated$ENTREZID, sep = "")
+
+#8 Add a column wtih the biotypes
+library(bitops)
+library(RCurl)
+library(httr)
+set_config( config( ssl_verifypeer = 0L ) )
+library(swirl)
+
+ensembl <- useEnsembl(biomart = "ensembl", 
+                   dataset = "hsapiens_gene_ensembl", 
+                   mirror = "useast")
+
+
+Biotypes <- getBM(attributes=c('ensembl_gene_id', 'gene_biotype'),
+      filters = 'ensembl_gene_id',
+      values = DE_table_Failure_Nil_annotated$GeneID,
+      mart = ensembl, useCache = FALSE)
+
+colnames(Biotypes) <- c('GeneID', 'Biotype')
+#9 join the complete columns
+
+DE_table_Failure_Nil_annotated <- left_join(DE_table_Failure_Nil_annotated, Biotypes, by = "GeneID") #266 7
+
+#WRITE THIS FILE BECAUSE IS IMPORTANT NOT TO HAVE TO RETURN ALL THE SCRIPT FROM ABOVE, SINCE ENSMBL MANY TIMES STOP WORKING
+#write.xlsx(DE_table_Failure_Nil_annotated, "DE_table_Failure_Nil_annotated.xlsx")
+
+#.# Load whenever you want to reanalyze something
+#DE_table_Failure_Nil_annotated <- read_excel("DE_table_Failure_Nil_annotated.xlsx") 
+
+
+```
+

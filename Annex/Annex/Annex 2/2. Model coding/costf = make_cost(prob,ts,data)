@@ -1,0 +1,24 @@
+costf = make_cost(prob,ts,data)
+last.(u0)[idxs] .= newu0
+
+newu0 = dat[idxs,1]
+
+
+
+
+p1 = train_cycles(p0,10)
+
+function train_cycles(p0, iters; lr = 0.000001)
+           pit = p0
+           for i = 1:iters
+               grad = ForwardDiff.gradient(costf, pit)
+               pit -= lr.*grad
+           end
+           return pit
+       end
+
+p0[grad .> 0 ] .= 2.
+p0[grad .> 0 ] .= 2.
+p0 = ones(length(p0))
+grad =  ForwardDiff.gradient(costf, p0)
+sol = solve(prob, Tsit5(), saveat=ts, p = p0)
